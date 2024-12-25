@@ -53,8 +53,8 @@ while True:
             center_y = y + h // 2
 
             # Calcular a margem de 5%
-            margin_x = int(0.05 * w)    #5%
-            margin_y = int(0.07 * h)    #7%
+            margin_x = int(0.05 * w)
+            margin_y = int(0.07 * h)
 
             # Desenhar o retângulo de rastreamento
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
@@ -82,6 +82,25 @@ while True:
                 print("Cabeça: Para a Direita")
             else:
                 print("Cabeça: Nível")
+
+                # Detecção de fechamento de olhos (apenas quando a cabeça está em nível)
+                left_eye_top = landmarks.part(37).y  # Ponto superior do olho esquerdo
+                left_eye_bottom = landmarks.part(41).y  # Ponto inferior do olho esquerdo
+                right_eye_top = landmarks.part(44).y  # Ponto superior do olho direito
+                right_eye_bottom = landmarks.part(40).y  # Ponto inferior do olho direito
+
+                # Calcular a altura dos olhos
+                left_eye_height = left_eye_bottom - left_eye_top
+                right_eye_height = right_eye_bottom - right_eye_top
+
+                # Definir um limite para considerar o olho como fechado
+                eye_threshold = 10  # Ajuste este valor conforme necessário
+
+                # Verificar se os olhos estão fechados
+                if left_eye_height < eye_threshold:
+                    print("Olho: Esquerdo Fechado")
+                if right_eye_height < eye_threshold:
+                    print("Olho: Direito Fechado")
 
         # Armazenar o frame atual como congelado
         frozen_frame = frame.copy()
