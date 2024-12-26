@@ -128,6 +128,8 @@ while True:
                     eyes_closed_time = 0  # Resetar o tempo se os olhos não estiverem fechados
                     if display_active:
                         print("Rastreamento Ativado")
+                        face_tracker = None  # Reiniciar o rastreador
+                        face_rect = None  # Reiniciar o retângulo da face
                     else:
                         print("Rastreamento Parado")
          
