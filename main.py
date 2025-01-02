@@ -1,5 +1,9 @@
 import cv2
 import dlib
+import serial as sp
+
+#Start Serial connection
+#ser = sp.Serial('COM3', 9600)
 
 # Inicializar captura de vídeo
 cap = cv2.VideoCapture(2)
@@ -20,6 +24,8 @@ tracking_active = True  # Estado do rastreamento
 
 nivel = True
 display_active = False
+headStat = 0
+eyeStat = 0
 
 while True:
     if not paused:
@@ -84,18 +90,23 @@ while True:
                 if nose.y < center_y - 10 - margin_y:
                     print("Cabeça: Para Cima")
                     nivel = False
+                    headStat = 1
                 elif nose.y > center_y + 10 + margin_y:
                     print("Cabeça: Para Baixo")
                     nivel = False
+                    headStat = 2
                 elif nose.x < center_x - 10 - margin_x:
                     print("Cabeça: Para a Esquerda")
                     nivel = False
+                    headStat = 3
                 elif nose.x > center_x + 10 + margin_x:
                     print("Cabeça: Para a Direita")
                     nivel = False
+                    headStat = 4
                 else:
                     print("Cabeça: Nível")
                     nivel = True
+                    headStat = 0
 
             # Detecção de fechamento de olhos (apenas quando a cabeça está em nível)
             left_eye_top = landmarks.part(37).y  # Ponto superior do olho esquerdo
@@ -113,9 +124,12 @@ while True:
 
             if left_eye_height < eye_threshold and nivel:
                 print("Olho esquerdo fechado")
-
-            if right_eye_height < eye_threshold and nivel:
+                eyeStat = 1
+            elif right_eye_height < eye_threshold and nivel:
                 print("Olho direito fechado")
+                eyeStat = 2
+            else:
+                eyeStat = 0
 
             
             # Verificar se os olhos estão fechados
@@ -147,6 +161,9 @@ while True:
         if tracking_active:
             cv2.imshow("Rastreamento de Cabeça", frame)  # Exibir frame
 
+    
+    #ser.write([headStat, eyeStat])
+    
     # Controlos
     key = cv2.waitKey(1) & 0xFF
     if key == ord('p'):  # Pressione 'p' para pausar
