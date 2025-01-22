@@ -6,7 +6,7 @@ import serial as sp
 #ser = sp.Serial('COM3', 9600)
 
 # Inicializar captura de vídeo
-cap = cv2.VideoCapture(2)
+cap = cv2.VideoCapture(1)
 
 # Carregar detector de faces e preditor de forma
 detector = dlib.get_frontal_face_detector()
@@ -65,8 +65,8 @@ while True:
             center_y = y + h // 2
 
             # Calcular a margem de 5%
-            margin_x = int(0.05 * w)    # 5%
-            margin_y = int(0.07 * h)    # 7%
+            margin_x = int(0.07 * w)    # 5%
+            margin_y = int(0.12 * h)    # 7%
 
             # Desenhar o retângulo de rastreamento
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
@@ -87,11 +87,11 @@ while True:
 
             if display_active and display_active:
                 # Calcular a inclinação da cabeça em relação ao centro do quadrado com margem
-                if nose.y < center_y - 10 - margin_y:
+                if nose.y < center_y - 7 - margin_y:
                     print("Cabeça: Para Cima")
                     nivel = False
                     headStat = 1
-                elif nose.y > center_y + 10 + margin_y:
+                elif nose.y > center_y + 7 + margin_y:
                     print("Cabeça: Para Baixo")
                     nivel = False
                     headStat = 2
@@ -138,7 +138,7 @@ while True:
                 
                 
                 if eyes_closed_time >= 30 :  # 30 frames correspondem a aproximadamente 3 segundos
-                    display_active = not display_active  # Desativar a exibição da  e prints
+                    display_active = not display_active  # Desativar a exibição da mask e prints
                     eyes_closed_time = 0  # Resetar o tempo se os olhos não estiverem fechados
                     if display_active:
                         print("Rastreamento Ativado")
@@ -175,6 +175,8 @@ while True:
         nivel = True  # Resetar o nível da cabeça
         display_active = False  # Ativar a exibição da display_active
         print("Reset")  # Mensagem de confirmação
+    elif key == ord('o'):
+        display_active = True
     elif key == ord('q'):  # Pressione 'q' para sair
         break
 
