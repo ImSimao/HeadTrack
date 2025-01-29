@@ -1,31 +1,48 @@
 import cv2
 import dlib
 import serial as sp
+import numpy as np
+
+# Inicializar captura de vídeo
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)  # Definir largura do frame
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)  # Definir altura do frame
 
 #Start Serial connection
 #ser = sp.Serial('COM3', 9600)
 
-# Inicializar captura de vídeo
-cap = cv2.VideoCapture(1)
 
-# Carregar detector de faces e preditor de forma
+# Carregar detector de faces e preditor de pontos faciais
+# dlib.get_frontal_face_detector() -> Detector de rostos pré-treinado
+# shape_predictor() -> Modelo de 68 pontos para identificar características faciais
+
 detector = dlib.get_frontal_face_detector()
 predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
 
-# Inicializar variáveis para rastreamento
+# Inicializar rastreador de rosto
 face_tracker = None
 face_rect = None
-paused = False  # Variável para controlar a pausa
-frozen_frame = None  # Variável para armazenar o frame congelado
+paused = False  # Controle de pausa
+frozen_frame = None  # Armazena o frame congelado
 
-# Variáveis para controle do fechamento dos olhos
-eyes_closed_time = 0  # Tempo em que os olhos estão fechados
+# Variáveis para controle do tempo de olhos fechados
+eyes_closed_time = 0
 tracking_active = True  # Estado do rastreamento
 
+# Variáveis de controle de status da cabeça e olhos
 nivel = True
 display_active = False
-headStat = 0
-eyeStat = 0
+headStat = 0  # Estado da cabeça (cima, baixo, esquerda, direita, nivelado)
+eyeStat = 0   # Estado dos olhos (abertos ou fechados)
+
+# Variáveis para suavização de pontos faciais
+alpha = 0.7  # Fator de suavização (peso do novo valor)
+prev_landmarks = None  # Armazena as posições anteriores dos pontos
+nose_history = []  # Histórico de posições do nariz para filtragem
+
+# Criar o rastreador CSRT (mais preciso para rastrear a face ao longo do tempo)
+def create_tracker():
+    return cv2.TrackerCSRT_create()
 
 while True:
     if not paused:
@@ -33,138 +50,136 @@ while True:
         if not ret:
             break
 
-        # Convertendo o frame para escala de cinza
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-        # Detectar faces
+        frame = cv2.flip(frame, 1)  # Espelhar a imagem para comportamento natural
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Converter para escala de cinza
+        
+        # Detecção de rosto e rastreamento
         if face_tracker is None:
-            faces = detector(gray)
-            if len(faces) > 0:
-                face_rect = faces[0]  # Este é um objeto dlib.rectangle
-                face_tracker = cv2.TrackerKCF_create()
+            faces = detector(gray)  # Detectar faces
+            if faces:
+                face_rect = faces[0]  # Seleciona a primeira face detectada
+                face_tracker = create_tracker()
                 face_tracker.init(frame, (face_rect.left(), face_rect.top(), face_rect.width(), face_rect.height()))
         else:
-            # Atualizar o rastreador
+            # Atualizar rastreador para seguir a face detectada
             success, new_face_rect = face_tracker.update(frame)
             if success:
-                face_rect = dlib.rectangle(int(new_face_rect[0]), int(new_face_rect[1]), 
-                                           int(new_face_rect[0] + new_face_rect[2]), 
-                                           int(new_face_rect[1] + new_face_rect[3]))
+                face_rect = dlib.rectangle(
+                    int(new_face_rect[0]), int(new_face_rect[1]), 
+                    int(new_face_rect[0] + new_face_rect[2]), 
+                    int(new_face_rect[1] + new_face_rect[3])
+                )
             else:
-                face_tracker = None  # Reiniciar rastreador se falhar
+                face_tracker = None  # Se falhar, reiniciar rastreamento
 
-        if face_rect is not None:
-            # Extrair coordenadas do objeto dlib.rectangle
+        if face_rect:
+            # Obter coordenadas da face
             x = face_rect.left()
             y = face_rect.top()
-            w = face_rect.right() - x
-            h = face_rect.bottom() - y
-
-            # Calcular o centro do quadrado
-            center_x = x + w // 2
+            w = face_rect.width()
+            h = face_rect.height()
+            
+            # Calcular o centro do rosto
+            center_x =  x + w // 2
             center_y = y + h // 2
+            
+            # Definir margens para detecção de movimento
+            margin_x = int(0.05 * w)
+            margin_y = int(0.07 * h)
 
-            # Calcular a margem de 5%
-            margin_x = int(0.07 * w)    # 5%
-            margin_y = int(0.12 * h)    # 7%
-
-            # Desenhar o retângulo de rastreamento
+            # Desenhar um retângulo ao redor do rosto detectado
             cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
 
-            # Obter marcos
+            # Obter pontos faciais
             landmarks = predictor(gray, face_rect)
-            # Desenhar marcos
-            if display_active:
+
+            # Suavização dos pontos faciais
+            if prev_landmarks is not None:
                 for n in range(68):
-                    x_landmark = landmarks.part(n).x
-                    y_landmark = landmarks.part(n).y
-                    cv2.circle(frame, (x_landmark, y_landmark), 2, (0, 255, 0), -1)  # Desenhar um ponto verde
+                    x_new = int(alpha * landmarks.part(n).x + (1 - alpha) * prev_landmarks[n][0])
+                    y_new = int(alpha * landmarks.part(n).y + (1 - alpha) * prev_landmarks[n][1])
+                    prev_landmarks[n] = (x_new, y_new)
+            else:
+                prev_landmarks = [(landmarks.part(n).x, landmarks.part(n).y) for n in range(68)]
 
-            # Obter as coordenadas do nariz e queixo
-            nose = landmarks.part(30)  # Ponta do nariz
-            chin = landmarks.part(8)    # Queixo
+            # Exibir pontos faciais suavizados
+            if display_active:
+                for x_landmark, y_landmark in prev_landmarks:
+                    cv2.circle(frame, (x_landmark, y_landmark), 2, (0, 255, 0), -1)
 
+            # Pegar a posição do nariz e queixo
+            nose = prev_landmarks[30]
+            chin = prev_landmarks[8]
 
-            if display_active and display_active:
-                # Calcular a inclinação da cabeça em relação ao centro do quadrado com margem
-                if nose.y < center_y - 7 - margin_y:
+            # Filtragem da posição do nariz para maior estabilidade
+            nose_history.append(nose)
+            if len(nose_history) > 5:
+                nose_history.pop(0)
+            avg_nose = np.mean(nose_history, axis=0).astype(int)
+
+            # Determinar direção da cabeça
+            if display_active:
+                if avg_nose[1] < center_y - margin_y:
                     print("Cabeça: Para Cima")
-                    nivel = False
                     headStat = 1
-                elif nose.y > center_y + 7 + margin_y:
+                elif avg_nose[1] > center_y + margin_y:
                     print("Cabeça: Para Baixo")
-                    nivel = False
                     headStat = 2
-                elif nose.x < center_x - 10 - margin_x:
+                elif avg_nose[0] < center_x - margin_x:
                     print("Cabeça: Para a Esquerda")
-                    nivel = False
                     headStat = 3
-                elif nose.x > center_x + 10 + margin_x:
+                elif avg_nose[0] > center_x + margin_x:
                     print("Cabeça: Para a Direita")
-                    nivel = False
                     headStat = 4
                 else:
                     print("Cabeça: Nível")
-                    nivel = True
                     headStat = 0
 
-            # Detecção de fechamento de olhos (apenas quando a cabeça está em nível)
-            left_eye_top = landmarks.part(37).y  # Ponto superior do olho esquerdo
-            left_eye_bottom = landmarks.part(41).y  # Ponto inferior do olho esquerdo
-            right_eye_top = landmarks.part(44).y  # Ponto superior do olho direito
-            right_eye_bottom = landmarks.part(40).y  # Ponto inferior do olho direito
-
-            # Calcular a altura dos olhos
+            # Verificação do estado dos olhos
+            left_eye_top = prev_landmarks[37][1]
+            left_eye_bottom = prev_landmarks[41][1]
+            right_eye_top = prev_landmarks[44][1]
+            right_eye_bottom = prev_landmarks[40][1]
+            
             left_eye_height = left_eye_bottom - left_eye_top
             right_eye_height = right_eye_bottom - right_eye_top
+
+            eye_threshold = 5  # Valor limite para considerar o olho fechado
             
-
-            # Definir um limite para considerar o olho como fechado
-            eye_threshold = 6  # Ajuste este valor conforme necessário
-
-            if left_eye_height < eye_threshold and nivel:
-                print("Olho esquerdo fechado")
-                eyeStat = 1
-            elif right_eye_height < eye_threshold and nivel:
-                print("Olho direito fechado")
-                eyeStat = 2
+            if left_eye_height < eye_threshold:
+                eyeStat = 1  # Olho esquerdo fechado
+            elif right_eye_height < eye_threshold:
+                eyeStat = 2  # Olho direito fechado
             else:
-                eyeStat = 0
-
+                eyeStat = 0  # Olhos abertos
             
-            # Verificar se os olhos estão fechados
-            if nivel and left_eye_height < eye_threshold and right_eye_height < eye_threshold:
-                eyes_closed_time += 1  # Incrementar o tempo de fechamento dos olhos
-                
-                
-                if eyes_closed_time >= 30 :  # 30 frames correspondem a aproximadamente 3 segundos
-                    display_active = not display_active  # Desativar a exibição da mask e prints
-                    eyes_closed_time = 0  # Resetar o tempo se os olhos não estiverem fechados
-                    if display_active:
-                        print("Rastreamento Ativado")
-                        face_tracker = None  # Reiniciar o rastreador
-                        face_rect = None  # Reiniciar o retângulo da face
-                    else:
-                        print("Rastreamento Parado")
-         
-            
-                
+            # Se ambos os olhos estiverem fechados por tempo suficiente, alternar rastreamento
+            if left_eye_height < eye_threshold and right_eye_height < eye_threshold:
+                eyes_closed_time += 1
+
+                if eyes_closed_time >= 90:
+                    display_active = not display_active
+                    eyes_closed_time = 0
+                    face_tracker = None if display_active else face_tracker
+                    face_rect = None if display_active else face_rect
+                    print("Rastreamento Ativado" if display_active else "Rastreamento Parado")
+
+            #ser.write([headStat, eyeStat])
 
 
-        # Armazenar o frame atual como congelado
-        frozen_frame = frame.copy()
+            # Armazenar o frame atual como congelado
+            frozen_frame = frame.copy()
 
-    # Exibir o frame (congelado ou atual)
-    if paused and frozen_frame is not None:
-        cv2.imshow("Rastreamento de Cabeça", frozen_frame)  # Exibir frame congelado
-    else:
-        if tracking_active:
-            cv2.imshow("Rastreamento de Cabeça", frame)  # Exibir frame
+            # Exibir o frame (congelado ou atual)
+            if paused and frozen_frame is not None:
+                cv2.imshow("Rastreamento de Cabeça", frozen_frame)  # Exibir frame congelado
+            else:
+                if tracking_active:
+                    cv2.imshow("Rastreamento de Cabeça", frame)  # Exibir frame
+
+
 
     
-    #ser.write([headStat, eyeStat])
-    
-    # Controlos
     key = cv2.waitKey(1) & 0xFF
     if key == ord('p'):  # Pressione 'p' para pausar
         paused = not paused  # Alternar estado de pausa
@@ -177,9 +192,8 @@ while True:
         print("Reset")  # Mensagem de confirmação
     elif key == ord('o'):
         display_active = True
-    elif key == ord('q'):  # Pressione 'q' para sair
+    elif key == ord('q'):
         break
 
-# Liberar a captura e fechar janelas
 cap.release()
 cv2.destroyAllWindows()
